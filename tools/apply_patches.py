@@ -92,9 +92,11 @@ CAP_OLD = """                    try:
 """
 
 CAP_NEW = """                    try:
-                        self.conn.cap("LS")
-                        (_, self.caps_supported) = await self._read_cap_reply()
+                        (_, self.caps_supported) = await self._cap_exchange("LS")
                         self.send_notice(f"Capabilities supported by server: {', '.join(self.caps_supported)}")
+
+                        if self.conn is None:
+                            return
 
                         # filter all unsupported caps away, comparing names only (CAP LS may carry a value)
                         supported = {cap.split("=", 1)[0] for cap in self.caps_supported}
@@ -102,9 +104,8 @@ CAP_NEW = """                    try:
 
                         if caps_req:
                             self.send_notice(f"Capabilities requested: {', '.join(caps_req)}")
-                            self.conn.cap("REQ", *caps_req)
 
-                            (subcommand, self.caps_enabled) = await self._read_cap_reply()
+                            (subcommand, self.caps_enabled) = await self._cap_exchange("REQ", *caps_req)
 
                             if subcommand == "ACK":
                                 self.send_notice(
@@ -118,37 +119,45 @@ CAP_NEW = """                    try:
 
 CAP_HELPER_ANCHOR = "    async def cmd_caps(self, args) -> None:"
 
-CAP_HELPER = """    async def _read_cap_reply(self):
-        # CAP replies can be split over multiple lines; continuation lines carry a "*" marker
-        # between the subcommand and the capability list.
+CAP_HELPER = """    async def _cap_exchange(self, subcommand, *args):
+        # Register the collector before sending. A multi-line CAP reply arrives in a
+        # single burst, and expect() only reports the last event of such a burst, so
+        # every capability from the earlier lines would be lost.
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
         tokens = []
 
-        while True:
-            self.caps_task = asyncio.ensure_future(self.conn.expect("cap", 10))
-            (connection, event) = await self.caps_task
-            self.caps_task = None
+        def collect(connection, event):
+            if future.done():
+                return
 
-            if self.conn is None:
-                raise asyncio.CancelledError()
+            params = event.arguments
+            if not params:
+                return
 
-            args = event.arguments
-            if not args:
-                continue
+            reply = params[0].upper()
 
-            subcommand = args[0].upper()
+            if reply == "NAK":
+                future.set_result(("NAK", []))
+                return
 
-            if subcommand == "NAK":
-                return (subcommand, [])
+            expected = "ACK" if subcommand == "REQ" else subcommand
+            if reply != expected:
+                return
 
-            if subcommand not in ("LS", "ACK", "NEW", "DEL"):
-                continue
-
-            more = len(args) > 2 and args[1] == "*"
-            chunk = args[2] if more else (args[1] if len(args) > 1 else "")
+            more = len(params) > 2 and params[1] == "*"
+            chunk = params[2] if more else (params[1] if len(params) > 1 else "")
             tokens.extend(chunk.split())
 
             if not more:
-                return (subcommand, tokens)
+                future.set_result((reply, tokens))
+
+        self.conn.add_global_handler("cap", collect, -100)
+        try:
+            self.conn.cap(subcommand, *args)
+            return await asyncio.wait_for(future, 10)
+        finally:
+            self.conn.remove_global_handler("cap", collect)
 
     async def cmd_caps(self, args) -> None:"""
 
