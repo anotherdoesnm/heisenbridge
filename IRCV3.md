@@ -91,7 +91,7 @@ Commands added by the fork:
   `draft/ICON` ISUPPORT token the server publishes (spec `draft/network-icon`);
   the bridge applies it on the first connect and only when the space has no
   avatar yet, so reconnects do not re-upload it. `SPACEICON` alone only reports
-  the icon and where it came from, `SPACEICON <url>` applies an explicit image URL
-  straight away, and `SPACEICON -` drops the override and re-applies the network
-  icon if the network publishes one. The override is worth keeping for networks
-  that publish no icon at all.
+  the icon and where it came from, `SPACEICON <url>` applies an explicit image
+  URL straight away, and `SPACEICON -` drops the override and re-applies the
+  network icon if the network publishes one. The override is worth keeping for
+  networks that publish no icon at all.
