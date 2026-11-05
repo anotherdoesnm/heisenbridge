@@ -23,6 +23,7 @@ Images are published to `ghcr.io/anotherdoesnm/heisenbridge` for every push to
 | Multi-line | `draft/multiline` batches | one event with newlines | 0011 |
 | Error replies | `standard-replies` (FAIL/WARN/NOTE) | readable notices | 0012 |
 | Read markers | `draft/read-marker` (MARKREAD) | `m.receipt` when the user posts | 0014 |
+| Network icon | `draft/ICON` ISUPPORT token (spec: `draft/network-icon`) | space avatar | 0013, 0015 |
 | Nick parsing | `multi-prefix`, `userhost-in-names` | correct puppet ids and member lists | 0009 |
 | Joins | `extended-join` | unchanged handling | 0009 |
 | Metadata | `account-tag`, `invite-notify`, `chghost`, `message-tags` | — | 0008 |
@@ -34,7 +35,7 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
 | CAP negotiation: multi-line replies and `cap=value` (SASL on UnrealIRCd-family servers) | 0001 |
 | De-duplicate the NAMES buffer (`mattf, mattf, mattf`) | 0002 |
 | Never merge events carrying `m.relates_to` into one message | 0005 |
-| `SPACEICON <url>` sets the managed space avatar | 0013 |
+| `SPACEICON <url>` overrides the space avatar on networks without an icon | 0013 |
 
 ## Not implemented
 
@@ -61,6 +62,16 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
   event of a burst, so a multi-line `CAP LS` reply was truncated to its last
   line and `sasl` was filtered out. Patch 0001 registers a collector before
   sending and completes it on the final line.
+- The IRCv3 specification is called "Network Icon" (`draft/network-icon`), but
+  the ISUPPORT token it defines is `draft/ICON` (the final, unprefixed name is
+  `ICON`). The bridge accepts both spellings and replaces the `{size}` template
+  variable with `512`. UnrealIRCd-family servers such as h4ks.com publish the
+  token in their `005` burst, which only arrives after registration, so the icon
+  is applied on connect rather than at space creation.
+- A space restored from account data had no `network` attribute — it was only set
+  in `SpaceRoom.create()` — so the `draft/ICON` handler raised `AttributeError`
+  after every bridge restart. Patch 0016 keeps the reference in `post_init()` and
+  resolves the network defensively in `apply_icon()`.
 
 ## Usage
 
@@ -76,6 +87,11 @@ services:
 
 Commands added by the fork:
 
-- `SPACEICON <url>` in the network room — set the icon of the managed space from
-  an image URL, `SPACEICON -` clears it, `SPACEICON` alone shows the current
-  value.
+- `SPACEICON` in the network room — the managed space avatar comes from the
+  `draft/ICON` ISUPPORT token the server publishes (spec `draft/network-icon`);
+  the bridge applies it on the first connect and only when the space has no
+  avatar yet, so reconnects do not re-upload it. `SPACEICON <url>` overrides the
+  icon with an explicit image URL, `SPACEICON -` drops the override, and
+  `SPACEICON` alone shows the current icon together with where it came from. The
+  override is worth keeping for networks that publish no icon, and it also forces
+  a re-apply on an existing space.
