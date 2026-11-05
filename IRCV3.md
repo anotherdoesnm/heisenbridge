@@ -22,6 +22,7 @@ Images are published to `ghcr.io/anotherdoesnm/heisenbridge` for every push to
 | Away state | `away-notify` | `m.presence` (`unavailable` + status) | 0010 |
 | Multi-line | `draft/multiline` batches | one event with newlines | 0011 |
 | Error replies | `standard-replies` (FAIL/WARN/NOTE) | readable notices | 0012 |
+| Read markers | `draft/read-marker` (MARKREAD) | `m.receipt` when the user posts | 0014 |
 | Nick parsing | `multi-prefix`, `userhost-in-names` | correct puppet ids and member lists | 0009 |
 | Joins | `extended-join` | unchanged handling | 0009 |
 | Metadata | `account-tag`, `invite-notify`, `chghost`, `message-tags` | — | 0008 |
@@ -41,6 +42,11 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
   which needs a reaction → event map that the bridge does not keep.
 - `draft/chathistory`: backfilling history into Matrix rooms is a large feature
   on its own and was left out rather than half-done.
+- `account-tag`: the capability is negotiated but the tag is not surfaced. The only
+  sensible Matrix-side mapping would rename puppets to `nick (account)`, which
+  breaks pills and mentions, so it is left alone.
+- Read markers from IRC to Matrix: a read marker from another user describes their
+  own state, and a Matrix receipt cannot be written on behalf of another user.
 - `echo-message`, `labeled-response`, `batch` outside multiline: not requested,
   because each one changes the message flow and needs its own handling.
 
