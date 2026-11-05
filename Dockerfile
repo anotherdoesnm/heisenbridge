@@ -10,7 +10,12 @@ COPY . .
 #
 # `python3-dev gcc musl-dev` are installed because building `multidict`
 # on armv7l fails otherwise. amd64 and aarch64 don't need this.
+#
+# `tools/apply_patches.py` applies this fork's changes to the pristine upstream
+# sources. It fails loudly when an anchor is gone, so a rebase cannot silently
+# produce an unpatched image.
 RUN apk add --no-cache --virtual build-dependencies py3-setuptools py3-pip python3-dev gcc musl-dev && \
+    python3 tools/apply_patches.py && \
     python setup.py gen_version && \
     rm -rf .git && \
     pip install --break-system-packages -e . && \
