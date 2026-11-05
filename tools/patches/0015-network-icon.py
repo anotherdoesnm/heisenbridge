@@ -91,18 +91,28 @@ CMD_OLD = """    async def cmd_spaceicon(self, args) -> None:
 """
 
 CMD_NEW = """    async def cmd_spaceicon(self, args) -> None:
-        if args.url is not None:
-            self.space_icon = None if args.url == "-" else args.url
-            await self.save()
+        if args.url is None:
+            icon = self.space_icon or self.network_icon
+
+            if icon is None:
+                self.send_notice("No space icon known: the network does not advertise draft/ICON and no URL is set.")
+                return
+
+            source = "SPACEICON override" if self.space_icon else "network draft/ICON"
+            self.send_notice(f"Space icon: {icon} (from {source}).")
+            return
+
+        self.space_icon = None if args.url == "-" else args.url
+        await self.save()
 
         icon = self.space_icon or self.network_icon
 
         if icon is None:
-            self.send_notice("No space icon known: the network does not advertise draft/ICON and no URL is set.")
+            self.send_notice("Override cleared, but the network publishes no icon: the avatar was left as it is.")
             return
 
         source = "SPACEICON override" if self.space_icon else "network draft/ICON"
-        self.send_notice(f"Space icon: {icon} (from {source}).")
+        self.send_notice(f"Space icon set to {icon} (from {source}).")
 
         if self.space is not None:
             await self.space.apply_icon(force=True)
