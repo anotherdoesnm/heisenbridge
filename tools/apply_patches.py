@@ -52,7 +52,7 @@ def replace_once(path, old, new, label):
 # compares full strings, so `sasl` never matches even on single-line replies.
 # ---------------------------------------------------------------------------
 
-CAP_OLD = '''                    try:
+CAP_OLD = """                    try:
                         self.conn.cap("LS")
                         self.caps_task = asyncio.ensure_future(self.conn.expect("cap", 10))
                         (connection, event) = await self.caps_task
@@ -89,9 +89,9 @@ CAP_OLD = '''                    try:
                                     self.send_notice("Capabilities request was rejected.")
                         else:
                             self.send_notice("No capabilities requested.")
-'''
+"""
 
-CAP_NEW = '''                    try:
+CAP_NEW = """                    try:
                         self.conn.cap("LS")
                         (_, self.caps_supported) = await self._read_cap_reply()
                         self.send_notice(f"Capabilities supported by server: {', '.join(self.caps_supported)}")
@@ -114,11 +114,11 @@ CAP_NEW = '''                    try:
                                 self.send_notice("Capabilities request was rejected.")
                         else:
                             self.send_notice("No capabilities requested.")
-'''
+"""
 
 CAP_HELPER_ANCHOR = "    async def cmd_caps(self, args) -> None:"
 
-CAP_HELPER = '''    async def _read_cap_reply(self):
+CAP_HELPER = """    async def _read_cap_reply(self):
         # CAP replies can be split over multiple lines; continuation lines carry a "*" marker
         # between the subcommand and the capability list.
         tokens = []
@@ -150,7 +150,7 @@ CAP_HELPER = '''    async def _read_cap_reply(self):
             if not more:
                 return (subcommand, tokens)
 
-    async def cmd_caps(self, args) -> None:'''
+    async def cmd_caps(self, args) -> None:"""
 
 
 def patch_caps():
