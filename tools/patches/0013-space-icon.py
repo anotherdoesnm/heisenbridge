@@ -71,9 +71,7 @@ CMD_OLD = """        cmd = CommandParser(prog="SPACE", description="create a man
 CMD_NEW = """        cmd = CommandParser(prog="SPACE", description="create a managed Matrix space for this network")
         self.commands.register(cmd, self.cmd_space)
 
-        cmd = CommandParser(
-            prog="SPACEICON", description="set the icon of the managed space from an image URL"
-        )
+        cmd = CommandParser(prog="SPACEICON", description="set the icon of the managed space from an image URL")
         cmd.add_argument("url", nargs="?", help="image URL, or '-' to clear it")
         self.commands.register(cmd, self.cmd_spaceicon)
 """
