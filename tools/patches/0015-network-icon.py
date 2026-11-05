@@ -98,9 +98,7 @@ CMD_NEW = """    async def cmd_spaceicon(self, args) -> None:
         icon = self.space_icon or self.network_icon
 
         if icon is None:
-            self.send_notice(
-                "No space icon known: the network does not advertise draft/ICON and no URL is set."
-            )
+            self.send_notice("No space icon known: the network does not advertise draft/ICON and no URL is set.")
             return
 
         source = "SPACEICON override" if self.space_icon else "network draft/ICON"
