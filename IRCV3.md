@@ -24,9 +24,10 @@ Images are published to `ghcr.io/anotherdoesnm/heisenbridge` for every push to
 | Error replies | `standard-replies` (FAIL/WARN/NOTE) | readable notices | 0012 |
 | Read markers | `draft/read-marker` (MARKREAD) | `m.receipt` when the user posts | 0014 |
 | Network icon | `draft/ICON` ISUPPORT token (spec: `draft/network-icon`) | space avatar | 0013, 0015 |
+| Metadata | `draft/metadata-2` (`avatar` key) | channel room avatar, puppet profile avatar | 0019 |
 | Nick parsing | `multi-prefix`, `userhost-in-names` | correct puppet ids and member lists | 0009 |
 | Joins | `extended-join` | unchanged handling | 0009 |
-| Metadata | `account-tag`, `invite-notify`, `chghost`, `message-tags` | — | 0008 |
+| Extra caps | `account-tag`, `invite-notify`, `chghost`, `message-tags` | — | 0008 |
 
 Extra fixes that are not IRCv3 but were needed on a modern server:
 
@@ -37,6 +38,8 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
 | Never merge events carrying `m.relates_to` into one message | 0005 |
 | `SPACEICON <url>` overrides the space avatar on networks without an icon | 0013 |
 | State events in room version 12 rooms (mautrix refuses them locally) | 0017 |
+| Invites without `is_direct` into an existing DM | 0018 |
+| Avatar URL cache that survives a restart | 0020 |
 
 ## Not implemented
 
@@ -79,6 +82,26 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
   every topic sync with an `IntentError`. The homeserver still treats the
   creator as an admin, so patch 0017 removes the pre-check and lets the server
   answer.
+
+## Avatars
+
+Two different IRCv3 mechanisms feed the same idea:
+
+- `draft/ICON` in `005` (spec "Network Icon") gives the icon of the whole
+  network, which the bridge puts on the managed space.
+- `draft/metadata-2` gives per-target metadata. The bridge subscribes to the
+  `avatar` key once per connection, so the server pushes the icon of every
+  channel it joins and of every user in it, plus updates as they change.
+
+Channel avatars become the Matrix room avatar of the channel room; user avatars
+become the puppet's profile avatar. The images are downloaded and re-uploaded to
+the homeserver (Matrix needs an mxc URI), and the URL to mxc mapping is kept in
+the bridge config so a restart does not upload everything again. Images larger
+than 4 MiB are skipped.
+
+`draft/metadata-2` also carries `display-name`, `url` and friends, which are
+ignored on purpose: renaming puppets from metadata breaks pills and mentions, and
+a "url" key has no obvious place in a Matrix room.
 
 ## Files and images
 
