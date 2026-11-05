@@ -12,6 +12,12 @@ permissions:
   contents: read
   packages: write
 
+# Builds run concurrently by default, so `latest` would end up pointing at
+# whichever commit finished last rather than the newest one.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   docker:
     runs-on: ubuntu-latest
@@ -52,7 +58,8 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          # arm64 under QEMU takes most of the build time; release tags get both
+          platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
