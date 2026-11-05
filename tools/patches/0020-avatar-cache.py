@@ -70,8 +70,7 @@ STORE_NEW = """        cache[url] = mxc
         return mxc
 """
 
-INIT_OLD = """        self._users = {}
-        self.avatar_cache = {}
+INIT_OLD = """        self.avatar_cache = {}
 """
 
 MAX_OLD = """    MAX_AVATAR_BYTES = 4 * 1024 * 1024
