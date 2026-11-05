@@ -36,6 +36,7 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
 | De-duplicate the NAMES buffer (`mattf, mattf, mattf`) | 0002 |
 | Never merge events carrying `m.relates_to` into one message | 0005 |
 | `SPACEICON <url>` overrides the space avatar on networks without an icon | 0013 |
+| State events in room version 12 rooms (mautrix refuses them locally) | 0017 |
 
 ## Not implemented
 
@@ -72,6 +73,41 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
   in `SpaceRoom.create()` — so the `draft/ICON` handler raised `AttributeError`
   after every bridge restart. Patch 0016 keeps the reference in `post_init()` and
   resolves the network defensively in `apply_icon()`.
+- Room version 12 (MSC4289) dropped the creator from
+  `m.room.power_levels.users`, so mautrix's local power level check saw the
+  bridge as power level 0 in rooms the bridge had created itself and dropped
+  every topic sync with an `IntentError`. The homeserver still treats the
+  creator as an admin, so patch 0017 removes the pre-check and lets the server
+  answer.
+
+## Files and images
+
+Sending an image, file, audio or video in a channel room makes the bridge post a
+public link to the IRC channel (and add a 🔗 reaction on the Matrix side). The
+link points at a small proxy inside the bridge, which fetches the media from the
+homeserver with the appservice token and streams it back. No extra container is
+needed: the same aiohttp app that receives transactions serves
+`/_heisenbridge/media/...`.
+
+The feature has to be switched on, because the bridge cannot guess its own public
+URL. Put `media_url` in the bridge config (the `irc` account data of the bridge
+user) and restart:
+
+```yaml
+media_url: https://heisen.doesnmlab.xyz
+```
+
+Links then look like
+`https://heisen.doesnmlab.xyz/_heisenbridge/media/<server>/<media_id>/<checksum>/<filename>`.
+The checksum is an HMAC of the mxc URI keyed with `media_key`, which defaults to
+the appservice `hs_token`; a wrong checksum is answered with 403, so the proxy is
+not an open relay into the media repository. Media is served with
+`Content-Disposition: attachment` and a sandboxing CSP, so browsers download it
+instead of rendering it inline.
+
+`--media-proxy` runs the same proxy as a standalone process, for deployments that
+do not want to expose the appservice port. It is not required when the bridge is
+already reachable over HTTPS.
 
 ## Usage
 
