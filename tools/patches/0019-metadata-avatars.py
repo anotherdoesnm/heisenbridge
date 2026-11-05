@@ -53,6 +53,10 @@ REGISTER_OLD = """                self.conn.add_global_handler("welcome", self.o
 REGISTER_NEW = """                self.conn.add_global_handler("welcome", self.on_welcome)
                 self.conn.add_global_handler("metadata", self.on_metadata)
                 self.conn.add_global_handler("761", self.on_keyvalue)  # RPL_KEYVALUE
+                self.conn.add_global_handler("770", self.on_metadata_numeric)  # RPL_METADATASUBOK
+                self.conn.add_global_handler("771", self.on_metadata_numeric)  # RPL_METADATAUNSUBOK
+                self.conn.add_global_handler("772", self.on_metadata_numeric)  # RPL_METADATASUBS
+                self.conn.add_global_handler("774", self.on_metadata_numeric)  # RPL_METADATASYNCLATER
 """
 
 METHODS_OLD = """    def on_welcome(self, conn, event) -> None:
@@ -60,12 +64,13 @@ METHODS_OLD = """    def on_welcome(self, conn, event) -> None:
 """
 
 METHODS_NEW = """    def on_metadata(self, conn, event) -> None:
-        # METADATA <Target> <Key> <Visibility> <Value>
+        # METADATA <Target> <Key> <Visibility> <Value>: python-irc moves the target
+        # into event.target and leaves key, visibility and value in arguments
         if len(event.arguments) < 3:
             return
 
-        target = event.arguments[0]
-        key = event.arguments[1].lower()
+        target = event.target
+        key = event.arguments[0].lower()
         value = event.arguments[-1]
 
         if key != "avatar":
@@ -75,19 +80,23 @@ METHODS_NEW = """    def on_metadata(self, conn, event) -> None:
         asyncio.ensure_future(self.apply_avatar(target, value))
 
     def on_keyvalue(self, conn, event) -> None:
-        # RPL_KEYVALUE (761): "<client> <Target> <Key> <Visibility> :<Value>"
-        arguments = event.arguments[1:]
-        if len(arguments) < 3:
+        # RPL_KEYVALUE (761) <client> <Target> <Key> <Visibility> :<Value>: the
+        # client nick ends up in event.target, the rest in arguments
+        if len(event.arguments) < 4:
             return
 
-        target = arguments[0]
-        key = arguments[1].lower()
-        value = arguments[-1]
+        target = event.arguments[0]
+        key = event.arguments[1].lower()
+        value = event.arguments[-1]
 
         if key != "avatar":
             return
 
         asyncio.ensure_future(self.apply_avatar(target, value))
+
+    def on_metadata_numeric(self, conn, event) -> None:
+        # 770/771/772/774 are subscription bookkeeping, nothing for the room
+        logging.debug(f"Metadata numeric {event.type}: {' '.join(event.arguments)}")
 
     async def apply_avatar(self, target: str, url: str) -> None:
         if not url or url in ("*", "-") or not url.startswith(("http://", "https://")):
