@@ -49,6 +49,10 @@ def replace_once(path, old, new, label):
 #
 # Capabilities may also carry a value (sasl=PLAIN,EXTERNAL), while the filter
 # compares full strings, so `sasl` never matches even on single-line replies.
+#
+# The reply also arrives in one burst, and expect() reports only the last event
+# of a burst, so a collector is registered before sending and completed on the
+# final line.
 # ---------------------------------------------------------------------------
 
 CAP_OLD = """                    try:
@@ -159,6 +163,30 @@ CAP_HELPER = """    async def _cap_exchange(self, subcommand, *args):
     async def cmd_caps(self, args) -> None:"""
 
 
+# ---------------------------------------------------------------------------
+# 0002 — de-duplicate the NAMES buffer
+#
+# on_namreply() appends to names_buffer and on_endofnames() consumes it. When
+# several NAMES replies for one channel land in a single burst (the join reply
+# plus an explicit NAMES, or a reconnect) the same nick is listed again and
+# again, so the member sync notice reads
+# "Users with owner (~): mattf, mattf, mattf" and the reported name count is
+# inflated. Membership itself is unaffected, this is purely cosmetic.
+# ---------------------------------------------------------------------------
+
+NAMES_OLD = """        names = list(self.names_buffer)
+        self.names_buffer = []
+"""
+
+NAMES_NEW = """        names = list(dict.fromkeys(self.names_buffer))
+        self.names_buffer = []
+"""
+
+
+def patch_names():
+    replace_once("heisenbridge/channel_room.py", NAMES_OLD, NAMES_NEW, "0002-names-dedupe")
+
+
 def patch_caps():
     replace_once("heisenbridge/network_room.py", CAP_OLD, CAP_NEW, "0001-cap-multiline-and-values")
     replace_once("heisenbridge/network_room.py", CAP_HELPER_ANCHOR, CAP_HELPER, "0001-cap-read-helper")
@@ -166,6 +194,7 @@ def patch_caps():
 
 def main():
     patch_caps()
+    patch_names()
     print("all patches applied")
 
 
