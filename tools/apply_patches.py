@@ -13,7 +13,6 @@ Run from the repository root (the Dockerfile does this at build time):
 
 Patches are idempotent: applying them twice is a no-op.
 """
-
 import pathlib
 import sys
 
@@ -108,9 +107,7 @@ CAP_NEW = """                    try:
                             (subcommand, self.caps_enabled) = await self._cap_exchange("REQ", *caps_req)
 
                             if subcommand == "ACK":
-                                self.send_notice(
-                                    f"Capabilities negotiated with server: {', '.join(self.caps_enabled)}"
-                                )
+                                self.send_notice(f"Capabilities negotiated with server: {', '.join(self.caps_enabled)}")
                             elif subcommand == "NAK":
                                 self.send_notice("Capabilities request was rejected.")
                         else:
