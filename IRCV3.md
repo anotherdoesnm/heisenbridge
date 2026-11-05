@@ -90,8 +90,8 @@ Commands added by the fork:
 - `SPACEICON` in the network room — the managed space avatar comes from the
   `draft/ICON` ISUPPORT token the server publishes (spec `draft/network-icon`);
   the bridge applies it on the first connect and only when the space has no
-  avatar yet, so reconnects do not re-upload it. `SPACEICON <url>` overrides the
-  icon with an explicit image URL, `SPACEICON -` drops the override, and
-  `SPACEICON` alone shows the current icon together with where it came from. The
-  override is worth keeping for networks that publish no icon, and it also forces
-  a re-apply on an existing space.
+  avatar yet, so reconnects do not re-upload it. `SPACEICON` alone only reports
+  the icon and where it came from, `SPACEICON <url>` applies an explicit image URL
+  straight away, and `SPACEICON -` drops the override and re-applies the network
+  icon if the network publishes one. The override is worth keeping for networks
+  that publish no icon at all.
