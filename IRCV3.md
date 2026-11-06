@@ -21,6 +21,7 @@ Images are published to `ghcr.io/anotherdoesnm/heisenbridge` for every push to
 | Reactions | `+draft/react` TAGMSG | `m.reaction` (`m.annotation`) | 0007 |
 | Away state | `away-notify` | `m.presence` (`unavailable` + status) | 0010 |
 | Multi-line | `draft/multiline` batches | one event with newlines | 0011 |
+| Typing | `+typing` client tag | `m.typing` for the puppet | 0022 |
 | Error replies | `standard-replies` (FAIL/WARN/NOTE) | readable notices | 0012 |
 | Read markers | `draft/read-marker` (MARKREAD) | `m.receipt` when the user posts | 0014 |
 | Network icon | `draft/ICON` ISUPPORT token (spec: `draft/network-icon`) | space avatar | 0013, 0015 |
@@ -40,6 +41,7 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
 | State events in room version 12 rooms (mautrix refuses them locally) | 0017 |
 | Invites without `is_direct` into an existing DM | 0018 |
 | Avatar URL cache that survives a restart | 0020 |
+| `MARKREAD` echo shown as a notice in the network room | 0021 |
 
 ## Not implemented
 
@@ -54,6 +56,9 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
   own state, and a Matrix receipt cannot be written on behalf of another user.
 - `echo-message`, `labeled-response`, `batch` outside multiline: not requested,
   because each one changes the message flow and needs its own handling.
+- Typing from Matrix to IRC: appservices never receive ephemeral events
+  (`m.typing`, `m.receipt`), so the bridge cannot tell when its user starts
+  typing. The other direction works.
 
 ## Notes from the field
 
@@ -62,6 +67,10 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
   Matrix → IRC direction works; the IRC → Matrix direction only fires on servers
   that do relay redactions.
 - `+draft/react` is relayed normally, so reactions work both ways there.
+- `draft/multiline` must be used as the batch type when sending a multiline
+  message. `draft/multiline-concat` is a different type (it joins lines without
+  separators) and obbyircd answers it with `FAIL BATCH UNKNOWN_TYPE`, after
+  which every line goes out as its own PRIVMSG.
 - SASL on such servers failed upstream because `expect()` returns only the last
   event of a burst, so a multi-line `CAP LS` reply was truncated to its last
   line and `sasl` was filtered out. Patch 0001 registers a collector before
