@@ -1,8 +1,9 @@
 # 0011 — draft/multiline: send and receive multi-line messages as IRCv3 batches
 #
 # Outgoing: a Matrix message that spans several lines is sent as one BATCH with
-# the draft/multiline-concat type instead of a burst of PRIVMSGs, so other
-# clients show it as a single message.
+# the draft/multiline type instead of a burst of PRIVMSGs, so other clients show
+# it as a single message. (draft/multiline-concat is a different batch type: it
+# joins lines without separators, which is not what a multiline message is.)
 #
 # Incoming: PRIVMSGs tagged with an open batch are collected and handed to the
 # room when the BATCH closes, which becomes one Matrix event with newlines.
@@ -62,7 +63,7 @@ BATCH_NEW = """    def on_batch(self, conn, event) -> None:
             return
 
         if ref.startswith("+"):
-            if event.arguments and event.arguments[0] == "draft/multiline-concat":
+            if event.arguments and event.arguments[0] in ("draft/multiline", "draft/multiline-concat"):
                 target = event.arguments[1].lower() if len(event.arguments) > 1 else None
                 room = self.rooms.get(target)
                 if room is not None:
@@ -121,7 +122,7 @@ SEND_OLD = """        for i, message in enumerate(messages):
 
 SEND_NEW = """        if len(messages) > 1 and "draft/multiline" in (self.network.caps_enabled or []):
             ref = f"ml{int(asyncio.get_running_loop().time() * 1000)}"
-            self.network.conn.send_items("BATCH", f"+{ref}", "draft/multiline-concat", self.name)
+            self.network.conn.send_items("BATCH", f"+{ref}", "draft/multiline", self.name)
             for message in messages:
                 self.network.conn.send_items(f"@batch={ref} PRIVMSG", self.name, ":" + message)
             self.network.conn.send_items("BATCH", f"-{ref}")
