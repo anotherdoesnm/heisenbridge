@@ -7,7 +7,8 @@
 #
 # which is the same user id on both sides, so the homeserver answered
 # "M_FORBIDDEN: You cannot kick yourself" and the event was lost with a
-# traceback in the log. The appservice intent can kick its own puppets.
+# traceback in the log. The same mistake sat in the rename path, where the old
+# puppet kicked itself when a nick changed.
 #
 # Standalone patch: run it from the repository root, or let tools/apply_patches.py
 # pick it up at build time. Anchored rewrites fail loudly when upstream moves.
@@ -52,9 +53,20 @@ KICK_NEW = """                    if event["user_id"] in self.members:
                             await self.az.intent.user(event["user_id"]).leave_room(self.id)
 """
 
+RENAME_OLD = """                        await self.az.intent.user(old_irc_user_id).kick_user(
+                            self.id, old_irc_user_id, f"Changing nick to {event['new_nick']}"
+                        )
+"""
+
+RENAME_NEW = """                        await self.az.intent.kick_user(
+                            self.id, old_irc_user_id, f"Changing nick to {event['new_nick']}"
+                        )
+"""
+
 
 def main():
     replace_once(ROOM, KICK_OLD, KICK_NEW, "kick-puppet")
+    replace_once(ROOM, RENAME_OLD, RENAME_NEW, "kick-rename")
 
 
 if __name__ == "__main__":
