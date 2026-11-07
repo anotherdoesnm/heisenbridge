@@ -40,7 +40,7 @@ IMPORT_NEW = "import random\nimport re\nimport signal\n"
 
 SHUTDOWN_OLD = "    async def run(self, listen_address, listen_port, homeserver_url, owner, safe_mode, media_proxy):\n"
 
-SHUTDOWN_NEW = '''    async def _graceful_shutdown(self) -> None:
+SHUTDOWN_NEW = """    async def _graceful_shutdown(self) -> None:
         # docker sends SIGTERM on redeploy, quit cleanly so the server drops the
         # session at once and the nick is free when the new container connects
         logging.info("Shutting down, sending QUIT to IRC networks")
@@ -58,7 +58,7 @@ SHUTDOWN_NEW = '''    async def _graceful_shutdown(self) -> None:
         os._exit(0)
 
     async def run(self, listen_address, listen_port, homeserver_url, owner, safe_mode, media_proxy):
-'''
+"""
 
 WAIT_OLD = """        await asyncio.Event().wait()
 
