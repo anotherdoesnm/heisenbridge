@@ -22,6 +22,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 CHAN = "heisenbridge/channel_room.py"
+PRIV = "heisenbridge/private_room.py"
 
 
 def replace_once(path, old, new, label):
@@ -42,6 +43,9 @@ def replace_once(path, old, new, label):
 IMPORT_OLD = "import asyncio\nimport html\nimport logging\n"
 IMPORT_NEW = "import asyncio\nimport html\nimport logging\nimport time\n"
 
+PRIV_IMPORT_OLD = "import re\nimport unicodedata\n"
+PRIV_IMPORT_NEW = "import re\nimport time\nimport unicodedata\n"
+
 CLASS_OLD = "class ChannelRoom(PrivateRoom):\n    key: Optional[str]"
 CLASS_NEW = """class ChannelRoom(PrivateRoom):
     # how long after a reconnect the join burst is swallowed: the user has seen
@@ -49,6 +53,21 @@ CLASS_NEW = """class ChannelRoom(PrivateRoom):
     QUIET_AFTER_JOIN = 30.0
 
     key: Optional[str]"""
+
+QUIET_OLD = """    def on_privnotice(self, conn, event) -> None:
+        if self.network is None:
+            return
+"""
+
+QUIET_NEW = """    def _quiet(self) -> bool:
+        # channels restore this from account data and go quiet for a while after
+        # a reconnect, everything else is never quiet
+        return time.time() < getattr(self, "quiet_until", 0.0)
+
+    def on_privnotice(self, conn, event) -> None:
+        if self.network is None or self._quiet():
+            return
+"""
 
 POST_OLD = """    async def post_init(self) -> None:
         await super().post_init()
@@ -64,9 +83,6 @@ POST_NEW = """    async def post_init(self) -> None:
         self.quiet_until = time.time() + self.QUIET_AFTER_JOIN
 
         await self.ensure_voice_widget()
-
-    def _quiet(self) -> bool:
-        return time.time() < getattr(self, "quiet_until", 0.0)
 """
 
 JOIN_OLD = """        # we don't need to sync ourself
@@ -165,20 +181,12 @@ MODEIS_NEW = """    def on_channelmodeis(self, conn, event) -> None:
             self.send_notice(f"Current channel modes: {' '.join(modes)}")
 """
 
-NOTICE_OLD = """    def on_privnotice(self, conn, event) -> None:
-        if self.network is None:
-            return
-"""
-
-NOTICE_NEW = """    def on_privnotice(self, conn, event) -> None:
-        if self.network is None or self._quiet():
-            return
-"""
-
 
 def main():
     replace_once(CHAN, IMPORT_OLD, IMPORT_NEW, "quiet-import")
+    replace_once(PRIV, PRIV_IMPORT_OLD, PRIV_IMPORT_NEW, "quiet-priv-import")
     replace_once(CHAN, CLASS_OLD, CLASS_NEW, "quiet-class")
+    replace_once(PRIV, QUIET_OLD, QUIET_NEW, "quiet-notice")
     replace_once(CHAN, POST_OLD, POST_NEW, "quiet-post-init")
     replace_once(CHAN, JOIN_OLD, JOIN_NEW, "quiet-join")
     replace_once(CHAN, PART_OLD, PART_NEW, "quiet-part")
@@ -187,7 +195,6 @@ def main():
     replace_once(CHAN, TOPIC_OLD, TOPIC_NEW, "quiet-topic")
     replace_once(CHAN, CHANNELCREATE_OLD, CHANNELCREATE_NEW, "quiet-channelcreate")
     replace_once(CHAN, MODEIS_OLD, MODEIS_NEW, "quiet-modeis")
-    replace_once(CHAN, NOTICE_OLD, NOTICE_NEW, "quiet-notice")
 
 
 if __name__ == "__main__":
