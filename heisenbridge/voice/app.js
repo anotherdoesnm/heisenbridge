@@ -34,15 +34,27 @@ function applyPresence(e) {
 
 async function onJoined(env) {
   const t = env.turn || {};
-  const iceServers = t.urls ? [{ urls: t.urls, username: t.username, credential: t.password }] : [];
+  const iceServers = [{ urls: "stun:stun.l.google.com:19302" }];
+  if (t.urls) iceServers.push({ urls: t.urls, username: t.username, credential: t.password });
   log("turn:", (t.urls || []).length + " url(s), mode:", env.mode);
+  for (const m of env.members || []) members.set(m, members.get(m) || { mic: false, speaking: false });
+  renderMembers();
 
   pc = new RTCPeerConnection({ iceServers });
-  pc.onicecandidate = (e) => e.candidate && send({ type: "ice", candidate: e.candidate });
+  pc.onicecandidate = (e) => {
+    if (!e.candidate) return;
+    send({
+      type: "ice",
+      cand: e.candidate.candidate,
+      mid: e.candidate.sdpMid ?? undefined,
+      mlineidx: e.candidate.sdpMLineIndex ?? undefined,
+    });
+  };
   pc.ontrack = (e) => { log("track:", e.track.kind); audioEl.srcObject = e.streams[0]; audioEl.play().catch(() => {}); };
-  pc.onconnectionstatechange = () => { log("pc:", pc.connectionState); if (pc.connectionState === "connected") setStatus("в звонке"); };
-
-  pc.addTransceiver("audio", { direction: "recvonly" });
+  pc.onconnectionstatechange = () => {
+    log("pc:", pc.connectionState);
+    if (pc.connectionState === "connected") setStatus("в звонке");
+  };
 
   if (env.mode !== "stream") {
     try {
@@ -54,8 +66,13 @@ async function onJoined(env) {
     }
   }
 
+  // a client that publishes nothing must still offer m-lines, or the SFU
+  // rejects the session; a captured mic already provides the audio m-line
+  if (!localStream) pc.addTransceiver("audio", { direction: "recvonly" });
+  pc.addTransceiver("video", { direction: "recvonly" });
+
   try {
-    const offer = await pc.createOffer({ offerToReceiveAudio: true });
+    const offer = await pc.createOffer();
     log("offer:", offer.sdp.length, "bytes");
     await pc.setLocalDescription(offer);
     send({ type: "offer", sdp: offer.sdp });
@@ -81,20 +98,29 @@ function onEnvelope(env) {
   if (!pc) return;
   if (env.type === "answer") {
     pc.setRemoteDescription({ type: "answer", sdp: env.sdp }).catch((e) => log("sdp:", e.message));
-  } else if (env.type === "ice" && env.candidate) {
-    pc.addIceCandidate(env.candidate).catch(() => {});
+  } else if (env.type === "ice" && env.cand) {
+    pc.addIceCandidate({ candidate: env.cand, sdpMid: env.mid, sdpMLineIndex: env.mlineidx }).catch((e) => log("ice:", e.message));
   }
 }
 
 function connect() {
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
   socket = new WebSocket(scheme + location.host + "/voice/ws");
-  socket.onopen = () => { setStatus("handshaking…"); socket.send(JSON.stringify({ action: "handshake", room_id: ROOM_ID, token: TOKEN })); };
+  socket.onopen = () => {
+    setStatus("handshaking…");
+    socket.send(JSON.stringify({ action: "handshake", room_id: ROOM_ID, token: TOKEN }));
+  };
   socket.onclose = () => { setStatus("disconnected"); joined = false; update(); };
   socket.onerror = () => setStatus("socket error");
   socket.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.action === "ready") { channel = m.channel; whoEl.textContent = m.network + " · " + (m.nick || "?"); setStatus("ready"); joinBtn.disabled = false; return; }
+    if (m.action === "ready") {
+      channel = m.channel;
+      whoEl.textContent = m.network + " · " + (m.nick || "?");
+      setStatus("ready");
+      joinBtn.disabled = false;
+      return;
+    }
     if (m.action === "signal") return onEnvelope(JSON.parse(m.payload));
     if (m.action === "error") { log("bridge:", m.message); setStatus("error: " + m.message); }
   };
