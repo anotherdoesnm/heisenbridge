@@ -60,6 +60,7 @@ METHOD_NEW = """    async def ensure_voice_widget(self) -> None:
             pass
 
         url = f"{base.rstrip('/')}/voice/index.html?roomId={self.id}"
+
         try:
             await self.az.intent.send_state_event(
                 self.id,
