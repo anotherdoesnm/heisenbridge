@@ -6,11 +6,26 @@ const q = new URLSearchParams(location.search);
 const ROOM_ID = q.get("roomId") || "", TOKEN = q.get("token") || "";
 
 let socket = null, pc = null, localStream = null, joined = false, micOn = false, channel = null;
-const members = new Map(), chunks = new Map();
+const members = new Map();
 
 const log = (...a) => { logEl.textContent += a.map(String).join(" ") + "\n"; logEl.scrollTop = logEl.scrollHeight; };
 const setStatus = (t) => { statusEl.textContent = t; };
-const send = (env) => { if (socket && socket.readyState === 1) socket.send(JSON.stringify({ action: "signal", payload: JSON.stringify(env) })); };
+const emit = (env) => {
+  if (socket && socket.readyState === 1) socket.send(JSON.stringify({ action: "signal", payload: JSON.stringify(env) }));
+};
+
+// IRC client tags have a hard size limit, so a large SDP is split into parts
+// that share an id; the SFU reassembles them by seq/total.
+const CHUNK = 1500;
+
+const send = (env) => {
+  if (!env.sdp) return emit(env);
+  const parts = [];
+  for (let i = 0; i < env.sdp.length; i += CHUNK) parts.push(env.sdp.slice(i, i + CHUNK));
+  if (parts.length < 2) return emit(env);
+  const id = "c" + Math.random().toString(36).slice(2);
+  parts.forEach((sdp, seq) => emit({ ...env, sdp, id, seq, total: parts.length }));
+};
 
 function renderMembers() {
   membersEl.innerHTML = "";
@@ -84,22 +99,36 @@ async function onJoined(env) {
   }
 }
 
+const inbound = new Map();
+const pendingIce = [];
+
+function flushIce() {
+  while (pendingIce.length) pc.addIceCandidate(pendingIce.shift()).catch(() => {});
+}
+
 function onEnvelope(env) {
-  log("<<", env.type, env.member || "");
-  if (env.type === "chunk") {
-    const acc = (chunks.get(env.id) || "") + (env.sdp || "");
-    chunks.set(env.id, acc);
-    if (!env.last) return;
-    chunks.delete(env.id);
-    return onEnvelope({ type: env.of || "answer", sdp: acc });
+  if (env.id && env.total > 1 && env.seq !== undefined) {
+    const slot = inbound.get(env.id) || { base: { ...env, sdp: undefined }, parts: new Array(env.total), filled: 0 };
+    if (slot.parts[env.seq] === undefined) slot.filled++;
+    slot.parts[env.seq] = env.sdp || "";
+    inbound.set(env.id, slot);
+    if (slot.filled < slot.total) return;
+    inbound.delete(env.id);
+    env = { ...slot.base, sdp: slot.parts.join("") };
   }
+
+  log("<<", env.type, env.member || "");
   if (env.type === "joined") return onJoined(env);
   if (env.type === "presence") return applyPresence(env);
   if (!pc) return;
   if (env.type === "answer") {
-    pc.setRemoteDescription({ type: "answer", sdp: env.sdp }).catch((e) => log("sdp:", e.message));
+    pc.setRemoteDescription({ type: "answer", sdp: env.sdp })
+      .then(() => { log("answer применён"); flushIce(); })
+      .catch((e) => log("sdp:", e.message));
   } else if (env.type === "ice" && env.cand) {
-    pc.addIceCandidate({ candidate: env.cand, sdpMid: env.mid, sdpMLineIndex: env.mlineidx }).catch((e) => log("ice:", e.message));
+    const cand = { candidate: env.cand, sdpMid: env.mid, sdpMLineIndex: env.mlineidx };
+    if (pc.remoteDescription) pc.addIceCandidate(cand).catch((e) => log("ice:", e.message));
+    else pendingIce.push(cand);
   }
 }
 
