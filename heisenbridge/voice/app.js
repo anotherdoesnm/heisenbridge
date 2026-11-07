@@ -1,6 +1,9 @@
 // IRC voice widget: bridges an IRCv3 `^voice` channel (obby.world/voice) into a
 // Matrix room. The bridge relays the `+obsidianirc/rtc` TAGMSG envelopes; this
 // page does the WebRTC part and talks to the SFU the IRC server points at.
+//
+// It needs nothing from the Matrix client: the bridge puts the room id and a
+// per-room token into the widget URL, and the socket presents them.
 
 const logEl = document.getElementById("log");
 const statusEl = document.getElementById("status");
@@ -10,7 +13,9 @@ const leaveBtn = document.getElementById("leave");
 const micBtn = document.getElementById("mic");
 const membersEl = document.getElementById("members");
 
-const ROOM_ID = new URLSearchParams(location.search).get("roomId") || "";
+const params = new URLSearchParams(location.search);
+const ROOM_ID = params.get("roomId") || "";
+const TOKEN = params.get("token") || "";
 
 function log(...parts) {
   logEl.textContent += parts.map(String).join(" ") + "\n";
@@ -19,71 +24,6 @@ function log(...parts) {
 
 function setStatus(text) {
   statusEl.textContent = text;
-}
-
-/* ---------------- Matrix widget API (MSC1236) ---------------- */
-
-let nextRequestId = 1;
-const pendingRequests = new Map();
-
-window.addEventListener("message", (event) => {
-  const data = event.data;
-  if (!data || typeof data !== "object") return;
-
-  // responses to our own requests
-  if (data.api === "toWidget" && data.requestId && pendingRequests.has(data.requestId)) {
-    const { resolve, reject } = pendingRequests.get(data.requestId);
-    pendingRequests.delete(data.requestId);
-    if (data.response && data.response.error) reject(new Error(JSON.stringify(data.response.error)));
-    else resolve(data.response || {});
-    return;
-  }
-
-  // requests from the client that we must answer
-  if (data.api === "toWidget" && data.action && data.requestId) {
-    if (data.action === "supported_api_versions") {
-      window.parent.postMessage(
-        { api: "fromWidget", action: data.action, requestId: data.requestId, response: { supported_versions: ["0.1"] } },
-        "*"
-      );
-    } else if (data.action === "capabilities" || data.action === "org.matrix.msc2974.request_capabilities") {
-      window.parent.postMessage(
-        { api: "fromWidget", action: data.action, requestId: data.requestId, response: { capabilities: ["m.send_event"] } },
-        "*"
-      );
-    }
-  }
-});
-
-function widgetRequest(action, data) {
-  const requestId = "ircvoice-" + nextRequestId++;
-  return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
-    window.parent.postMessage({ api: "fromWidget", action, data, requestId }, "*");
-    setTimeout(() => {
-      if (pendingRequests.delete(requestId)) reject(new Error("widget request timed out: " + action));
-    }, 15000);
-  });
-}
-
-// Vommet only grants what the widget asks for, and asks the user once.
-async function requestCapabilities() {
-  try {
-    const response = await widgetRequest("org.matrix.msc2974.request_capabilities", {
-      capabilities: ["m.send_event"],
-    });
-    log("capabilities:", JSON.stringify(response).slice(0, 200));
-  } catch (e) {
-    log("capability request failed:", e.message);
-  }
-}
-
-// The bridge reads this message, binds the socket to the sender and redacts it.
-async function sendHandshake(nonce) {
-  return widgetRequest("send_event", {
-    type: "m.room.message",
-    content: { msgtype: "m.text", body: "!obby-voice-handshake " + nonce },
-  });
 }
 
 /* ---------------- bridge socket ---------------- */
@@ -96,16 +36,23 @@ let nick = null;
 function connect() {
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
   socket = new WebSocket(scheme + location.host + "/voice/ws");
+
+  socket.addEventListener("open", () => {
+    setStatus("handshaking…");
+    socket.send(JSON.stringify({ action: "handshake", room_id: ROOM_ID, token: TOKEN }));
+  });
+
   socket.addEventListener("close", () => {
     setStatus("disconnected");
     joined = false;
     updateButtons();
   });
+
   socket.addEventListener("error", () => setStatus("socket error"));
   socket.addEventListener("message", (event) => onBridgeMessage(JSON.parse(event.data)));
 }
 
-async function onBridgeMessage(msg) {
+function onBridgeMessage(msg) {
   if (msg.action === "ready") {
     nick = msg.nick;
     channel = msg.channel;
@@ -130,7 +77,6 @@ async function onBridgeMessage(msg) {
   if (msg.action === "error") {
     log("bridge error:", msg.message);
     setStatus("error: " + msg.message);
-    return;
   }
 }
 
@@ -193,26 +139,12 @@ micBtn.addEventListener("click", () => {
   sendSignal({ type: "mic", state: micBtn.classList.contains("on") ? "off" : "on" });
 });
 
-async function main() {
-  if (!ROOM_ID) {
-    setStatus("missing roomId in the widget URL");
+function main() {
+  if (!ROOM_ID || !TOKEN) {
+    setStatus("widget URL is missing roomId or token");
     return;
   }
-
   connect();
-  socket.addEventListener("open", async () => {
-    setStatus("handshaking…");
-    await requestCapabilities();
-
-    const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    socket.send(JSON.stringify({ action: "handshake", nonce, room_id: ROOM_ID }));
-    try {
-      await sendHandshake(nonce);
-    } catch (e) {
-      log("handshake message failed:", e.message);
-      setStatus("handshake failed");
-    }
-  });
 }
 
 main();
