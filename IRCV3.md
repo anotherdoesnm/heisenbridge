@@ -45,7 +45,7 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
 | `MARKREAD` echo shown as a notice in the network room | 0021 |
 | Bridge presence stayed offline: `set_presence` was given the user id instead of the state | 0040 |
 | Every reconnect replayed the topic, modes and member list as messages | 0041, 0042, 0046 |
-| History batches were posted as new messages instead of being dropped | 0043 |
+| History replay was posted as new messages, including replay nested in multiline batches | 0043, 0047 |
 | SIGTERM killed the connection without a QUIT, so the nick could still be taken | 0044 |
 | Puppets were kicked with their own intent (`M_FORBIDDEN: You cannot kick yourself`) | 0045 |
 
@@ -96,6 +96,13 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
   `chathistory`. The bridge advertises the capability so servers do not fall back
   to replaying history as plain PRIVMSGs, and drops such a batch if it comes
   anyway: history is never backfilled into Matrix rooms.
+- Parley replays channel history on join as a `BATCH` of type `chathistory`.
+  Messages that had several lines come wrapped in a `draft/multiline` batch
+  opened *inside* that history batch, so dropping only the outer batch still
+  posted them; both are dropped now, together with TAGMSGs (reactions, typing)
+  that arrive inside a replay. The bridge advertises `draft/chathistory`, which
+  should make a server wait for explicit requests, but Parley sends the fallback
+  regardless.
 - A reconnect makes the server replay the state of every channel (topic, modes,
   creation time, NAMES). Rooms restored from account data are already known to
   the user, so the bridge swallows that burst for 30 seconds after a reconnect;
