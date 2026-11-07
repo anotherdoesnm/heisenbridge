@@ -49,8 +49,12 @@ function widgetRequest(action, data) {
   });
 }
 
-async function sendState(type, stateKey, content) {
-  return widgetRequest("send_event", { type, state_key: stateKey, content });
+// The bridge reads this message, binds the socket to the sender and redacts it.
+async function sendHandshake(nonce) {
+  return widgetRequest("send_event", {
+    type: "m.room.message",
+    content: { msgtype: "m.text", body: "!obby-voice-handshake " + nonce },
+  });
 }
 
 /* ---------------- bridge socket ---------------- */
@@ -63,7 +67,6 @@ let nick = null;
 function connect() {
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
   socket = new WebSocket(scheme + location.host + "/voice/ws");
-  socket.addEventListener("open", () => setStatus("handshaking…"));
   socket.addEventListener("close", () => {
     setStatus("disconnected");
     joined = false;
@@ -169,12 +172,13 @@ async function main() {
 
   connect();
   socket.addEventListener("open", async () => {
+    setStatus("handshaking…");
     const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
     socket.send(JSON.stringify({ action: "handshake", nonce, room_id: ROOM_ID }));
     try {
-      await sendState("com.obby.rtc.session", "", { nonce });
+      await sendHandshake(nonce);
     } catch (e) {
-      log("handshake state event failed:", e.message);
+      log("handshake message failed:", e.message);
       setStatus("handshake failed");
     }
   });
