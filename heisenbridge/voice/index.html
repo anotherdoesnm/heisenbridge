@@ -16,8 +16,13 @@
     <button id="join" disabled>Join voice</button>
     <button id="leave" disabled>Leave</button>
     <button id="mic" disabled>Mic: off</button>
+    <select id="mode">
+      <option value="^">voice ^</option>
+      <option value="$">stream $</option>
+    </select>
   </main>
   <ul id="members"></ul>
+  <audio id="audio" autoplay></audio>
   <pre id="log"></pre>
 </div>
 <script src="app.js"></script>
