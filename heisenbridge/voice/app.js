@@ -1,15 +1,16 @@
 const $ = (id) => document.getElementById(id);
 const logEl = $("log"), statusEl = $("status"), whoEl = $("who");
 const joinBtn = $("join"), leaveBtn = $("leave"), micBtn = $("mic");
-const membersEl = $("members"), audioEl = $("audio"), modeSel = $("mode");
+const membersEl = $("members"), audioEl = $("audio");
 const q = new URLSearchParams(location.search);
 const ROOM_ID = q.get("roomId") || "", TOKEN = q.get("token") || "";
 
 let socket = null, pc = null, localStream = null, joined = false, micOn = false, channel = null;
-const members = new Map();
+const members = new Map(), chunks = new Map();
 
 const log = (...a) => { logEl.textContent += a.map(String).join(" ") + "\n"; logEl.scrollTop = logEl.scrollHeight; };
 const setStatus = (t) => { statusEl.textContent = t; };
+const send = (env) => { if (socket && socket.readyState === 1) socket.send(JSON.stringify({ action: "signal", payload: JSON.stringify(env) })); };
 
 function renderMembers() {
   membersEl.innerHTML = "";
@@ -21,22 +22,50 @@ function renderMembers() {
 }
 
 function applyPresence(e) {
-  const nick = e.member;
-  if (!nick) return;
-  if (e.state === "left" || e.state === "gone") { members.delete(nick); return renderMembers(); }
-  const m = members.get(nick) || { mic: false, speaking: false };
+  if (!e.member) return;
+  if (e.state === "left" || e.state === "gone") { members.delete(e.member); return renderMembers(); }
+  const m = members.get(e.member) || { mic: false, speaking: false };
   if (e.kind === "mic") m.mic = e.state === "on";
   else if (e.kind === "speaking") m.speaking = e.state === "speaking";
   else if (e.state === "joined") m.mic = true;
-  members.set(nick, m);
+  members.set(e.member, m);
   renderMembers();
 }
 
-function send(env) {
-  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ action: "signal", payload: JSON.stringify(env) }));
-}
+async function onJoined(env) {
+  const t = env.turn || {};
+  const iceServers = t.urls ? [{ urls: t.urls, username: t.username, credential: t.password }] : [];
+  log("turn:", (t.urls || []).length + " url(s), mode:", env.mode);
 
-const chunks = new Map();
+  pc = new RTCPeerConnection({ iceServers });
+  pc.onicecandidate = (e) => e.candidate && send({ type: "ice", candidate: e.candidate });
+  pc.ontrack = (e) => { log("track:", e.track.kind); audioEl.srcObject = e.streams[0]; audioEl.play().catch(() => {}); };
+  pc.onconnectionstatechange = () => { log("pc:", pc.connectionState); if (pc.connectionState === "connected") setStatus("в звонке"); };
+
+  pc.addTransceiver("audio", { direction: "recvonly" });
+
+  if (env.mode !== "stream") {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStream.getAudioTracks().forEach((tr) => { tr.enabled = false; pc.addTrack(tr, localStream); });
+      log("микрофон есть (выключен)");
+    } catch (e) {
+      log("без микрофона:", e.message);
+    }
+  }
+
+  try {
+    const offer = await pc.createOffer({ offerToReceiveAudio: true });
+    log("offer:", offer.sdp.length, "bytes");
+    await pc.setLocalDescription(offer);
+    send({ type: "offer", sdp: offer.sdp });
+    log("offer отправлен");
+    setStatus("подключаюсь к SFU…");
+  } catch (e) {
+    log("ошибка оффера:", e.name, e.message);
+    setStatus("ошибка оффера");
+  }
+}
 
 function onEnvelope(env) {
   log("<<", env.type, env.member || "");
@@ -50,46 +79,11 @@ function onEnvelope(env) {
   if (env.type === "joined") return onJoined(env);
   if (env.type === "presence") return applyPresence(env);
   if (!pc) return;
-  if (env.type === "answer") pc.setRemoteDescription({ type: "answer", sdp: env.sdp }).catch((e) => log("sdp:", e.message));
-  else if (env.type === "ice" && env.candidate) pc.addIceCandidate(env.candidate).catch(() => {});
-}
-
-async function onJoined(env) {
-  const t = env.turn || {};
-  const iceServers = t.urls ? [{ urls: t.urls, username: t.username, credential: t.password }] : [];
-  log("turn:", (t.urls || []).length + " url(s), mode:", env.mode);
-
-  pc = new RTCPeerConnection({ iceServers });
-  pc.onicecandidate = (e) => e.candidate && send({ type: "ice", candidate: e.candidate });
-  pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; audioEl.play().catch(() => {}); };
-  pc.onconnectionstatechange = () => { log("pc:", pc.connectionState); if (pc.connectionState === "connected") setStatus("в звонке"); };
-
-  // a stream is listen-only, and without mic permission we still want to hear
-  pc.addTransceiver("audio", { direction: "recvonly" });
-
-  if (env.mode !== "stream") {
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStream.getAudioTracks().forEach((tr) => { tr.enabled = false; pc.addTrack(tr, localStream); });
-      log("микрофон есть (выключен)");
-    } catch (e) {
-      log("без микрофона:", e.message);
-    }
+  if (env.type === "answer") {
+    pc.setRemoteDescription({ type: "answer", sdp: env.sdp }).catch((e) => log("sdp:", e.message));
+  } else if (env.type === "ice" && env.candidate) {
+    pc.addIceCandidate(env.candidate).catch(() => {});
   }
-
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  send({ type: "offer", sdp: offer.sdp });
-  setStatus("подключаюсь к SFU…");
-}
-
-function toggleMic() {
-  if (!localStream) return;
-  micOn = !micOn;
-  localStream.getAudioTracks().forEach((t) => (t.enabled = micOn));
-  micBtn.textContent = micOn ? "Mic: on" : "Mic: off";
-  micBtn.classList.toggle("on", micOn);
-  send({ type: "mic", state: micOn ? "on" : "off" });
 }
 
 function connect() {
@@ -109,9 +103,8 @@ function connect() {
 const update = () => { joinBtn.disabled = joined || !socket; leaveBtn.disabled = !joined; micBtn.disabled = !joined; };
 
 joinBtn.onclick = () => {
-  const target = modeSel.value + channel.replace(/^[\^$]/, "");
-  joined = true; members.clear(); renderMembers(); setStatus("joining… " + target); update();
-  socket.send(JSON.stringify({ action: "join", channel: target }));
+  joined = true; members.clear(); renderMembers(); setStatus("joining " + channel); update();
+  socket.send(JSON.stringify({ action: "join", channel }));
 };
 
 leaveBtn.onclick = () => {
@@ -122,7 +115,14 @@ leaveBtn.onclick = () => {
   socket.send(JSON.stringify({ action: "leave" }));
 };
 
-micBtn.onclick = toggleMic;
+micBtn.onclick = () => {
+  if (!localStream) return;
+  micOn = !micOn;
+  localStream.getAudioTracks().forEach((t) => (t.enabled = micOn));
+  micBtn.textContent = micOn ? "Mic: on" : "Mic: off";
+  micBtn.classList.toggle("on", micOn);
+  send({ type: "mic", state: micOn ? "on" : "off" });
+};
 
 if (!ROOM_ID || !TOKEN) setStatus("widget URL is missing roomId or token");
 else { update(); connect(); }
