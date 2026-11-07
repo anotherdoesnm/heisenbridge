@@ -81,10 +81,11 @@ async function onJoined(env) {
     }
   }
 
-  // a client that publishes nothing must still offer m-lines, or the SFU
-  // rejects the session; a captured mic already provides the audio m-line
+  // a client that publishes nothing must still offer an m-line, or the SFU
+  // rejects the session; a captured mic already provides the audio one.
+  // No video transceiver: browsers stuff every codec they know into it, the
+  // offer grows past what the SFU accepts, and we only play audio anyway.
   if (!localStream) pc.addTransceiver("audio", { direction: "recvonly" });
-  pc.addTransceiver("video", { direction: "recvonly" });
 
   try {
     const offer = await pc.createOffer();
