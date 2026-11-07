@@ -1,150 +1,166 @@
-// IRC voice widget: bridges an IRCv3 `^voice` channel (obby.world/voice) into a
-// Matrix room. The bridge relays the `+obsidianirc/rtc` TAGMSG envelopes; this
-// page does the WebRTC part and talks to the SFU the IRC server points at.
-//
-// It needs nothing from the Matrix client: the bridge puts the room id and a
-// per-room token into the widget URL, and the socket presents them.
+// IRC voice widget: joins an obby `^voice` / `$stream` channel through the bridge
+// and does WebRTC against the SFU the IRC server points at.
 
-const logEl = document.getElementById("log");
-const statusEl = document.getElementById("status");
-const whoEl = document.getElementById("who");
-const joinBtn = document.getElementById("join");
-const leaveBtn = document.getElementById("leave");
-const micBtn = document.getElementById("mic");
-const membersEl = document.getElementById("members");
+const $ = (id) => document.getElementById(id);
+const logEl = $("log"), statusEl = $("status"), whoEl = $("who");
+const joinBtn = $("join"), leaveBtn = $("leave"), micBtn = $("mic");
+const membersEl = $("members"), audioEl = $("audio"), modeSel = $("mode");
 
-const params = new URLSearchParams(location.search);
-const ROOM_ID = params.get("roomId") || "";
-const TOKEN = params.get("token") || "";
+const p = new URLSearchParams(location.search);
+const ROOM_ID = p.get("roomId") || "";
+const TOKEN = p.get("token") || "";
 
-function log(...parts) {
-  logEl.textContent += parts.map(String).join(" ") + "\n";
-  logEl.scrollTop = logEl.scrollHeight;
+let socket = null, pc = null, localStream = null;
+let channel = null, joined = false, micOn = false;
+const members = new Map();
+
+function log(...a) { logEl.textContent += a.map(String).join(" ") + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+function setStatus(t) { statusEl.textContent = t; }
+
+/* ---------- members ---------- */
+
+function renderMembers() {
+  membersEl.innerHTML = "";
+  for (const [nick, m] of members) {
+    const li = document.createElement("li");
+    li.textContent = nick + (m.mic ? " 🎤" : " 🔇") + (m.speaking ? " · говорит" : "");
+    membersEl.appendChild(li);
+  }
 }
 
-function setStatus(text) {
-  statusEl.textContent = text;
+function applyPresence(e) {
+  const nick = e.member;
+  if (!nick) return;
+  if (e.state === "left" || e.state === "gone") { members.delete(nick); renderMembers(); return; }
+  const m = members.get(nick) || { mic: false, speaking: false };
+  if (e.kind === "mic") m.mic = e.state === "on";
+  else if (e.kind === "speaking") m.speaking = e.state === "speaking";
+  else if (e.state === "joined") m.mic = true;
+  members.set(nick, m);
+  renderMembers();
 }
 
-/* ---------------- bridge socket ---------------- */
+/* ---------- signalling ---------- */
 
-let socket = null;
-let joined = false;
-let channel = null;
-let nick = null;
+function send(env) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ action: "signal", payload: JSON.stringify(env) }));
+}
+
+const chunkBuf = new Map();
+
+function onEnvelope(env) {
+  log("<<", env.type, env.member || "");
+  if (env.type === "chunk") {
+    const id = env.id;
+    const acc = chunkBuf.get(id) || "";
+    chunkBuf.set(id, acc + (env.sdp || ""));
+    if (env.last) {
+      const sdp = chunkBuf.get(id);
+      chunkBuf.delete(id);
+      onEnvelope({ type: env.of || "answer", sdp });
+    }
+    return;
+  }
+  if (env.type === "joined") return onJoined(env);
+  if (env.type === "presence") return applyPresence(env);
+  if (!pc) return;
+  if (env.type === "answer") pc.setRemoteDescription({ type: "answer", sdp: env.sdp }).catch((e) => log("sdp:", e.message));
+  else if (env.type === "ice" && env.candidate) pc.addIceCandidate(env.candidate).catch(() => {});
+}
+
+async function onJoined(env) {
+  const turn = env.turn || {};
+  const iceServers = turn.urls ? [{ urls: turn.urls, username: turn.username, credential: turn.password }] : [];
+  log("turn:", (turn.urls || []).join(",") || "none", "mode:", env.mode);
+
+  pc = new RTCPeerConnection({ iceServers });
+  pc.onicecandidate = (e) => e.candidate && send({ type: "ice", candidate: e.candidate });
+  pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; audioEl.play().catch(() => {}); };
+  pc.onconnectionstatechange = () => {
+    log("pc:", pc.connectionState);
+    if (pc.connectionState === "connected") setStatus("в звонке");
+  };
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    localStream.getAudioTracks().forEach((t) => { t.enabled = false; pc.addTrack(t, localStream); });
+    log("микрофон получен (выключен)");
+  } catch (e) {
+    log("без микрофона:", e.message);
+  }
+
+  const offer = await pc.createOffer({ offerToReceiveAudio: true });
+  await pc.setLocalDescription(offer);
+  send({ type: "offer", sdp: offer.sdp });
+  setStatus("подключаюсь к SFU…");
+}
+
+function toggleMic() {
+  if (!localStream) return;
+  micOn = !micOn;
+  localStream.getAudioTracks().forEach((t) => (t.enabled = micOn));
+  micBtn.textContent = micOn ? "Mic: on" : "Mic: off";
+  micBtn.classList.toggle("on", micOn);
+  send({ type: "mic", state: micOn ? "on" : "off" });
+}
+
+/* ---------- socket ---------- */
 
 function connect() {
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
   socket = new WebSocket(scheme + location.host + "/voice/ws");
-
-  socket.addEventListener("open", () => {
+  socket.onopen = () => {
     setStatus("handshaking…");
     socket.send(JSON.stringify({ action: "handshake", room_id: ROOM_ID, token: TOKEN }));
-  });
-
-  socket.addEventListener("close", () => {
-    setStatus("disconnected");
-    joined = false;
-    updateButtons();
-  });
-
-  socket.addEventListener("error", () => setStatus("socket error"));
-  socket.addEventListener("message", (event) => onBridgeMessage(JSON.parse(event.data)));
-}
-
-function onBridgeMessage(msg) {
-  if (msg.action === "ready") {
-    nick = msg.nick;
-    channel = msg.channel;
-    whoEl.textContent = `${msg.network} · ${nick || "?"}`;
-    setStatus("ready");
-    joinBtn.disabled = false;
-    return;
-  }
-
-  if (msg.action === "signal") {
-    let payload;
-    try {
-      payload = JSON.parse(msg.payload);
-    } catch (e) {
-      log("bad payload", msg.payload);
+  };
+  socket.onclose = () => { setStatus("disconnected"); joined = false; update(); };
+  socket.onerror = () => setStatus("socket error");
+  socket.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.action === "ready") {
+      channel = msg.channel;
+      whoEl.textContent = `${msg.network} · ${msg.nick || "?"}`;
+      setStatus("ready");
+      joinBtn.disabled = false;
       return;
     }
-    handleSignal(payload, msg.from);
-    return;
-  }
-
-  if (msg.action === "error") {
-    log("bridge error:", msg.message);
-    setStatus("error: " + msg.message);
-  }
+    if (msg.action === "signal") return onEnvelope(JSON.parse(msg.payload));
+    if (msg.action === "error") { log("bridge:", msg.message); setStatus("error: " + msg.message); }
+  };
 }
 
-/* ---------------- signalling ---------------- */
-
-function handleSignal(payload, from) {
-  log("<<", payload.type, from || "", payload.member || "");
-  if (payload.type === "joined") {
-    onSfuJoined(payload);
-  } else if (payload.type === "presence") {
-    renderMembers(payload);
-  }
-}
-
-function onSfuJoined(payload) {
-  log("SFU turn:", JSON.stringify(payload.turn || {}).slice(0, 120));
-  log("mode:", payload.mode, "role:", payload.role, "streamers:", JSON.stringify(payload.streamers || []));
-  setStatus("in call (media not wired up yet)");
-  updateButtons();
-}
-
-function renderMembers(payload) {
-  const li = document.createElement("li");
-  li.textContent = `${payload.member} — ${payload.state}${payload.role ? " (" + payload.role + ")" : ""}`;
-  membersEl.appendChild(li);
-}
-
-function sendSignal(envelope) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-  socket.send(JSON.stringify({ action: "signal", payload: JSON.stringify(envelope) }));
-}
-
-/* ---------------- UI ---------------- */
-
-function updateButtons() {
+function update() {
   joinBtn.disabled = joined || !socket;
   leaveBtn.disabled = !joined;
   micBtn.disabled = !joined;
-  micBtn.classList.toggle("on", joined);
-  micBtn.textContent = joined ? "Mic: on" : "Mic: off";
 }
 
-joinBtn.addEventListener("click", () => {
+joinBtn.onclick = () => {
+  const target = modeSel.value + channel.replace(/^[\^$]/, "");
   joined = true;
-  membersEl.innerHTML = "";
-  setStatus("joining…");
-  updateButtons();
-  socket.send(JSON.stringify({ action: "join" }));
-});
+  members.clear();
+  renderMembers();
+  setStatus("joining… " + target);
+  update();
+  socket.send(JSON.stringify({ action: "join", channel: target }));
+};
 
-leaveBtn.addEventListener("click", () => {
+leaveBtn.onclick = () => {
   joined = false;
+  if (pc) { pc.close(); pc = null; }
+  if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; }
+  audioEl.srcObject = null;
   setStatus("left");
-  membersEl.innerHTML = "";
-  updateButtons();
+  update();
   socket.send(JSON.stringify({ action: "leave" }));
-});
+};
 
-micBtn.addEventListener("click", () => {
-  sendSignal({ type: "mic", state: micBtn.classList.contains("on") ? "off" : "on" });
-});
+micBtn.onclick = toggleMic;
 
-function main() {
-  if (!ROOM_ID || !TOKEN) {
-    setStatus("widget URL is missing roomId or token");
-    return;
-  }
+if (!ROOM_ID || !TOKEN) {
+  setStatus("widget URL is missing roomId or token");
+} else {
+  update();
   connect();
 }
-
-main();
