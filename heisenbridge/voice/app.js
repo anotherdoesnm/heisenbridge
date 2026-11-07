@@ -103,7 +103,11 @@ function connect() {
 const update = () => { joinBtn.disabled = joined || !socket; leaveBtn.disabled = !joined; micBtn.disabled = !joined; };
 
 joinBtn.onclick = () => {
-  joined = true; members.clear(); renderMembers(); setStatus("joining " + channel); update();
+  joined = true;
+  members.clear();
+  renderMembers();
+  setStatus("joining " + channel);
+  update();
   socket.send(JSON.stringify({ action: "join", channel }));
 };
 
@@ -111,7 +115,9 @@ leaveBtn.onclick = () => {
   joined = false;
   if (pc) { pc.close(); pc = null; }
   if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; }
-  audioEl.srcObject = null; setStatus("left"); update();
+  audioEl.srcObject = null;
+  setStatus("left");
+  update();
   socket.send(JSON.stringify({ action: "leave" }));
 };
 
@@ -124,5 +130,9 @@ micBtn.onclick = () => {
   send({ type: "mic", state: micOn ? "on" : "off" });
 };
 
-if (!ROOM_ID || !TOKEN) setStatus("widget URL is missing roomId or token");
-else { update(); connect(); }
+if (!ROOM_ID || !TOKEN) {
+  setStatus("widget URL is missing roomId or token");
+} else {
+  update();
+  connect();
+}
