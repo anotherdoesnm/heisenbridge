@@ -29,6 +29,7 @@ Images are published to `ghcr.io/anotherdoesnm/heisenbridge` for every push to
 | Nick parsing | `multi-prefix`, `userhost-in-names` | correct puppet ids and member lists | 0009 |
 | Joins | `extended-join` | unchanged handling | 0009 |
 | Extra caps | `account-tag`, `invite-notify`, `chghost`, `message-tags` | — | 0008 |
+| Voice | `obsidianirc/voice` (`^` voice, `$` stream) | WebRTC in a room widget | 0023–0039 |
 
 Extra fixes that are not IRCv3 but were needed on a modern server:
 
@@ -140,6 +141,48 @@ instead of rendering it inline.
 `--media-proxy` runs the same proxy as a standalone process, for deployments that
 do not want to expose the appservice port. It is not required when the bridge is
 already reachable over HTTPS.
+
+## Voice
+
+`obsidianirc/voice` (obby) is a small voice and stream protocol on top of IRCv3
+client tags: `^` channels are voice rooms, `$` channels are stream-only rooms,
+and all signalling is a JSON envelope carried in
+`@+obsidianirc/rtc=<json> TAGMSG`.
+
+The bridge relays those TAGMSGs between IRC and a Matrix widget, so a Matrix user
+joins a voice channel from the room instead of opening an IRC client. On join the
+SFU answers with `joined`, which carries the member list and TURN credentials;
+the widget builds a `RTCPeerConnection` from them and offers, and the answer and
+ICE candidates come back through the same tag. Media goes straight from the
+browser to the SFU — the bridge only moves signalling.
+
+The widget is served by the bridge itself at `/voice/index.html`, from the same
+aiohttp app that receives transactions, so no extra container or host is needed.
+It is added to `^` and `$` channel rooms automatically, with a per-room token in
+the URL (`hmac_sha256(media_key, room_id)[:32]`). The widget presents that token
+on the WebSocket at `/voice/ws` and the bridge binds the session to the network
+and channel; a wrong or missing token is rejected, so the endpoint is not an open
+relay into IRC.
+
+Requirements: the bridge has to be reachable over HTTPS (the client loads the
+widget from it) and the IRC network has to support `obsidianirc/voice`. Audio
+only — the widget publishes no video, because a video transceiver inflates the
+offer past what the SFU accepts and the widget only plays audio anyway.
+
+### The 512 byte trap
+
+`python-irc` refuses to send a line longer than 512 bytes:
+
+```python
+if len(bytes) > 512:
+    raise MessageTooLong(msg)
+```
+
+An SDP offer is about 1.2 KB, so every offer raised `MessageTooLong` inside
+`send_raw` and never reached the server, while small ICE candidates went
+through. The symptom was a widget stuck at "connecting to SFU" with no error on
+either side. Patch 0039 overrides `_prep_message` on the connection: short lines
+keep the original path, long ones skip the cap.
 
 ## Usage
 
