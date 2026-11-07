@@ -48,6 +48,7 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
 | History replay was posted as new messages, including replay nested in multiline batches | 0043, 0047 |
 | SIGTERM killed the connection without a QUIT, so the nick could still be taken | 0044 |
 | Puppets were kicked with their own intent (`M_FORBIDDEN: You cannot kick yourself`) | 0045 |
+| Multiline messages were posted by the bridge account instead of the IRC user | 0048 |
 
 ## Not implemented
 
@@ -73,6 +74,9 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
   Matrix → IRC direction works; the IRC → Matrix direction only fires on servers
   that do relay redactions.
 - `+draft/react` is relayed normally, so reactions work both ways there.
+- In `draft/multiline` the message tags (`msgid`, `+draft/reply`) sit on the
+  `BATCH` line, not on the individual `PRIVMSG`s, so the bridge reads the sender
+  and the reply target from there and only buffers the text.
 - `draft/multiline` must be used as the batch type when sending a multiline
   message. `draft/multiline-concat` is a different type (it joins lines without
   separators) and obbyircd answers it with `FAIL BATCH UNKNOWN_TYPE`, after
