@@ -43,6 +43,11 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
 | Invites without `is_direct` into an existing DM | 0018 |
 | Avatar URL cache that survives a restart | 0020 |
 | `MARKREAD` echo shown as a notice in the network room | 0021 |
+| Bridge presence stayed offline: `set_presence` was given the user id instead of the state | 0040 |
+| Every reconnect replayed the topic, modes and member list as messages | 0041, 0042, 0046 |
+| History batches were posted as new messages instead of being dropped | 0043 |
+| SIGTERM killed the connection without a QUIT, so the nick could still be taken | 0044 |
+| Puppets were kicked with their own intent (`M_FORBIDDEN: You cannot kick yourself`) | 0045 |
 
 ## Not implemented
 
@@ -86,6 +91,15 @@ Extra fixes that are not IRCv3 but were needed on a modern server:
   in `SpaceRoom.create()` — so the `draft/ICON` handler raised `AttributeError`
   after every bridge restart. Patch 0016 keeps the reference in `post_init()` and
   resolves the network defensively in `apply_icon()`.
+- UnrealIRCd publishes its capabilities in two bursts and, with
+  `draft/chathistory` requested, may wrap a history replay in a `BATCH` of type
+  `chathistory`. The bridge advertises the capability so servers do not fall back
+  to replaying history as plain PRIVMSGs, and drops such a batch if it comes
+  anyway: history is never backfilled into Matrix rooms.
+- A reconnect makes the server replay the state of every channel (topic, modes,
+  creation time, NAMES). Rooms restored from account data are already known to
+  the user, so the bridge swallows that burst for 30 seconds after a reconnect;
+  a channel joined for the first time still reports itself.
 - Room version 12 (MSC4289) dropped the creator from
   `m.room.power_levels.users`, so mautrix's local power level check saw the
   bridge as power level 0 in rooms the bridge had created itself and dropped
