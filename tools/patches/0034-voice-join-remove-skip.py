@@ -10,7 +10,6 @@
 # Standalone patch: run it from the repository root, or let tools/apply_patches.py
 # pick it up at build time. Anchored rewrites fail loudly when upstream moves.
 import pathlib
-import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 NET = "heisenbridge/network_room.py"
