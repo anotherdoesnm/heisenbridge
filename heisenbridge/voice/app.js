@@ -29,12 +29,29 @@ const pendingRequests = new Map();
 window.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || typeof data !== "object") return;
-  if (data.api !== "toWidget") return;
-  if (data.response && data.requestId && pendingRequests.has(data.requestId)) {
+
+  // responses to our own requests
+  if (data.api === "toWidget" && data.requestId && pendingRequests.has(data.requestId)) {
     const { resolve, reject } = pendingRequests.get(data.requestId);
     pendingRequests.delete(data.requestId);
-    if (data.response.error) reject(new Error(JSON.stringify(data.response.error)));
-    else resolve(data.response);
+    if (data.response && data.response.error) reject(new Error(JSON.stringify(data.response.error)));
+    else resolve(data.response || {});
+    return;
+  }
+
+  // requests from the client that we must answer
+  if (data.api === "toWidget" && data.action && data.requestId) {
+    if (data.action === "supported_api_versions") {
+      window.parent.postMessage(
+        { api: "fromWidget", action: data.action, requestId: data.requestId, response: { supported_versions: ["0.1"] } },
+        "*"
+      );
+    } else if (data.action === "capabilities" || data.action === "org.matrix.msc2974.request_capabilities") {
+      window.parent.postMessage(
+        { api: "fromWidget", action: data.action, requestId: data.requestId, response: { capabilities: ["m.send_event"] } },
+        "*"
+      );
+    }
   }
 });
 
@@ -47,6 +64,18 @@ function widgetRequest(action, data) {
       if (pendingRequests.delete(requestId)) reject(new Error("widget request timed out: " + action));
     }, 15000);
   });
+}
+
+// Vommet only grants what the widget asks for, and asks the user once.
+async function requestCapabilities() {
+  try {
+    const response = await widgetRequest("org.matrix.msc2974.request_capabilities", {
+      capabilities: ["m.send_event"],
+    });
+    log("capabilities:", JSON.stringify(response).slice(0, 200));
+  } catch (e) {
+    log("capability request failed:", e.message);
+  }
 }
 
 // The bridge reads this message, binds the socket to the sender and redacts it.
@@ -173,6 +202,8 @@ async function main() {
   connect();
   socket.addEventListener("open", async () => {
     setStatus("handshaking…");
+    await requestCapabilities();
+
     const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
     socket.send(JSON.stringify({ action: "handshake", nonce, room_id: ROOM_ID }));
     try {
